@@ -11,38 +11,52 @@ const CARDS = [
 
 export default function ProductCards() {
   return (
-    <div
-      style={{
-        display: "grid",
-        gap: 12,
-        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-      }}
-    >
-      {CARDS.map((c) => (
-        <div
-          key={c.title}
-          style={{
-            background: "white",
-            border: "1px solid #e5e7eb",
-            borderRadius: 14,
-            padding: "16px 18px",
-            transition: "box-shadow 0.2s, border-color 0.2s",
-            cursor: "default",
-          }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLDivElement).style.borderColor = "#CE191E";
-            (e.currentTarget as HTMLDivElement).style.boxShadow = "0 4px 16px rgba(206,25,30,0.12)";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLDivElement).style.borderColor = "#e5e7eb";
-            (e.currentTarget as HTMLDivElement).style.boxShadow = "none";
-          }}
-        >
-          <div style={{ fontSize: 22, marginBottom: 8 }}>{c.icon}</div>
-          <div style={{ fontWeight: 700, color: "#111827", fontSize: 14, marginBottom: 4 }}>{c.title}</div>
-          <div style={{ color: "#6b7280", fontSize: 12.5, lineHeight: 1.5 }}>{c.desc}</div>
-        </div>
-      ))}
-    </div>
+    <>
+      <style>{`
+        .carbis-cards-grid {
+          display: grid;
+          gap: 12px;
+          grid-template-columns: repeat(3, 1fr);
+        }
+        @media (max-width: 640px) {
+          .carbis-cards-grid {
+            grid-template-columns: repeat(2, 1fr);
+            gap: 8px;
+          }
+        }
+        @media (max-width: 360px) {
+          .carbis-cards-grid {
+            grid-template-columns: 1fr;
+          }
+        }
+        .carbis-card {
+          background: white;
+          border: 1px solid #e5e7eb;
+          border-radius: 14px;
+          padding: 16px 18px;
+          transition: box-shadow 0.2s, border-color 0.2s;
+          cursor: default;
+        }
+        .carbis-card:hover {
+          border-color: #CE191E;
+          box-shadow: 0 4px 16px rgba(206,25,30,0.12);
+        }
+        @media (max-width: 640px) {
+          .carbis-card {
+            padding: 12px 14px;
+            border-radius: 12px;
+          }
+        }
+      `}</style>
+      <div className="carbis-cards-grid">
+        {CARDS.map((c) => (
+          <div key={c.title} className="carbis-card">
+            <div style={{ fontSize: "clamp(18px, 4vw, 22px)", marginBottom: 8 }}>{c.icon}</div>
+            <div style={{ fontWeight: 700, color: "#111827", fontSize: "clamp(12.5px, 2.5vw, 14px)", marginBottom: 4 }}>{c.title}</div>
+            <div style={{ color: "#6b7280", fontSize: "clamp(11px, 2.2vw, 12.5px)", lineHeight: 1.5 }}>{c.desc}</div>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }

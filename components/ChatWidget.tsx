@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 
 type Msg = { role: "user" | "assistant"; text: string };
 
@@ -45,7 +45,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
             </a>
           );
         }
-        i += 3; // skip the captured groups
+        i += 3;
       } else if (/^https?:\/\//.test(part)) {
         inlineNodes.push(
           <a key={i} href={part} target="_blank" rel="noopener noreferrer"
@@ -87,6 +87,20 @@ const SUGGESTIONS = [
   "How does your process work?",
 ];
 
+// Hook to detect mobile viewport
+function useIsMobile(breakpoint = 480) {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    function check() {
+      setIsMobile(window.innerWidth <= breakpoint);
+    }
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -99,19 +113,29 @@ export default function ChatWidget() {
   const [input, setInput] = useState("");
   const [showSuggestions, setShowSuggestions] = useState(true);
   const endRef = useRef<HTMLDivElement>(null);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [msgs, open]);
 
-  async function send(messageOverride?: string) {
+  // Prevent body scroll when chat is open on mobile
+  useEffect(() => {
+    if (open && isMobile) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => { document.body.style.overflow = ""; };
+  }, [open, isMobile]);
+
+  const send = useCallback(async (messageOverride?: string) => {
     const text = (messageOverride ?? input).trim();
     if (!text || loading) return;
 
     setInput("");
     setShowSuggestions(false);
 
-    // Build history from existing messages (excluding the initial greeting)
     const history = msgs.slice(1).map((m) => ({
       role: m.role,
       text: m.text,
@@ -162,47 +186,138 @@ export default function ChatWidget() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [input, loading, msgs]);
+
+  // ─── Styles ──────────────────────────────────────────────────────────────────
+
+  const bubbleStyle: React.CSSProperties = {
+    position: "fixed",
+    bottom: isMobile ? 16 : 24,
+    right: isMobile ? 16 : 24,
+    width: isMobile ? 52 : 60,
+    height: isMobile ? 52 : 60,
+    borderRadius: "50%",
+    background: "linear-gradient(135deg, #CE191E, #a01217)",
+    border: "none",
+    cursor: "pointer",
+    boxShadow: "0 4px 20px rgba(206,25,30,0.45)",
+    display: open && isMobile ? "none" : "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 9999,
+    transition: "transform 0.2s ease, box-shadow 0.2s ease",
+  };
+
+  const panelStyle: React.CSSProperties = isMobile
+    ? {
+        position: "fixed",
+        inset: 0,
+        borderRadius: 0,
+        boxShadow: "none",
+        border: "none",
+        overflow: "hidden",
+        background: "#fff",
+        zIndex: 9998,
+        display: "flex",
+        flexDirection: "column",
+        animation: "slideUp 0.2s ease",
+      }
+    : {
+        position: "fixed",
+        bottom: 100,
+        right: 24,
+        width: 400,
+        maxWidth: "calc(100vw - 48px)",
+        maxHeight: "calc(100vh - 140px)",
+        borderRadius: 20,
+        boxShadow: "0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.1)",
+        border: "1px solid rgba(0,0,0,0.08)",
+        overflow: "hidden",
+        background: "#fff",
+        zIndex: 9998,
+        display: "flex",
+        flexDirection: "column",
+        animation: "slideUp 0.25s ease",
+      };
+
+  const messagesStyle: React.CSSProperties = {
+    flex: 1,
+    minHeight: 0,
+    overflowY: "auto",
+    padding: isMobile ? "12px 12px 8px" : "14px 14px 8px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    background: "#FAFAFA",
+    WebkitOverflowScrolling: "touch",
+  };
 
   return (
     <>
+      {/* Global responsive styles */}
+      <style>{`
+        @keyframes slideUp {
+          from { opacity: 0; transform: translateY(16px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes pulse {
+          0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
+          40% { transform: scale(1); opacity: 1; }
+        }
+        .carbis-input:focus {
+          outline: none;
+          border-color: #CE191E !important;
+          box-shadow: 0 0 0 3px rgba(206,25,30,0.12);
+        }
+        .carbis-send:hover:not(:disabled) {
+          background: linear-gradient(135deg, #b01419, #8a0f13) !important;
+        }
+        .carbis-suggestion:hover {
+          background: #fff0f0 !important;
+          border-color: #CE191E !important;
+          color: #CE191E !important;
+        }
+        /* Smooth scrollbar for desktop */
+        .carbis-messages::-webkit-scrollbar {
+          width: 5px;
+        }
+        .carbis-messages::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .carbis-messages::-webkit-scrollbar-thumb {
+          background: rgba(0,0,0,0.15);
+          border-radius: 10px;
+        }
+        .carbis-messages::-webkit-scrollbar-thumb:hover {
+          background: rgba(0,0,0,0.25);
+        }
+      `}</style>
+
       {/* Floating bubble */}
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Open Carbis chat"
-        style={{
-          position: "fixed",
-          bottom: 24,
-          right: 24,
-          width: 60,
-          height: 60,
-          borderRadius: "50%",
-          background: "linear-gradient(135deg, #CE191E, #a01217)",
-          border: "none",
-          cursor: "pointer",
-          boxShadow: "0 4px 20px rgba(206,25,30,0.45)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          zIndex: 9999,
-          transition: "transform 0.2s ease, box-shadow 0.2s ease",
-        }}
+        style={bubbleStyle}
         onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.08)";
-          (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 6px 28px rgba(206,25,30,0.6)";
+          if (!isMobile) {
+            (e.currentTarget as HTMLButtonElement).style.transform = "scale(1.08)";
+            (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 6px 28px rgba(206,25,30,0.6)";
+          }
         }}
         onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
-          (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 20px rgba(206,25,30,0.45)";
+          if (!isMobile) {
+            (e.currentTarget as HTMLButtonElement).style.transform = "scale(1)";
+            (e.currentTarget as HTMLButtonElement).style.boxShadow = "0 4px 20px rgba(206,25,30,0.45)";
+          }
         }}
       >
         {open ? (
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+          <svg width={isMobile ? 18 : 20} height={isMobile ? 18 : 20} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         ) : (
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width={isMobile ? 22 : 24} height={isMobile ? 22 : 24} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         )}
@@ -210,52 +325,22 @@ export default function ChatWidget() {
 
       {/* Chat panel */}
       {open && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 100,
-            right: 24,
-            width: 380,
-            maxWidth: "calc(100vw - 32px)",
-            borderRadius: 20,
-            boxShadow: "0 20px 60px rgba(0,0,0,0.18), 0 4px 16px rgba(0,0,0,0.1)",
-            border: "1px solid rgba(0,0,0,0.08)",
-            overflow: "hidden",
-            background: "#fff",
-            zIndex: 9998,
-            display: "flex",
-            flexDirection: "column",
-            animation: "slideUp 0.25s ease",
-          }}
-        >
-          <style>{`
-            @keyframes slideUp {
-              from { opacity: 0; transform: translateY(16px); }
-              to   { opacity: 1; transform: translateY(0); }
-            }
-            @keyframes pulse {
-              0%, 80%, 100% { transform: scale(0); opacity: 0.4; }
-              40% { transform: scale(1); opacity: 1; }
-            }
-            .carbis-input:focus { outline: none; border-color: #CE191E !important; box-shadow: 0 0 0 3px rgba(206,25,30,0.12); }
-            .carbis-send:hover:not(:disabled) { background: linear-gradient(135deg, #b01419, #8a0f13) !important; }
-            .carbis-suggestion:hover { background: #fff0f0 !important; border-color: #CE191E !important; color: #CE191E !important; }
-          `}</style>
-
+        <div style={panelStyle}>
           {/* Header */}
           <div
             style={{
               background: "linear-gradient(135deg, #0a0202, #1a0404)",
-              padding: "16px 18px",
+              padding: isMobile ? "14px 16px" : "16px 18px",
               display: "flex",
               alignItems: "center",
               gap: 12,
+              flexShrink: 0,
             }}
           >
             <div
               style={{
-                width: 40,
-                height: 40,
+                width: isMobile ? 36 : 40,
+                height: isMobile ? 36 : 40,
                 borderRadius: "50%",
                 background: "linear-gradient(135deg, #CE191E, #a01217)",
                 display: "flex",
@@ -264,17 +349,17 @@ export default function ChatWidget() {
                 flexShrink: 0,
               }}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width={isMobile ? 16 : 18} height={isMobile ? 16 : 18} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
             </div>
             <div style={{ flex: 1 }}>
-              <div style={{ color: "white", fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>
+              <div style={{ color: "white", fontWeight: 700, fontSize: isMobile ? 14 : 15, lineHeight: 1.2 }}>
                 Carbis AI Assistant
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
                 <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#22c55e" }} />
-                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: 12 }}>Online · Carbis Solutions Group</span>
+                <span style={{ color: "rgba(255,255,255,0.6)", fontSize: isMobile ? 11 : 12 }}>Online · Carbis Solutions Group</span>
               </div>
             </div>
             <button
@@ -285,13 +370,13 @@ export default function ChatWidget() {
                 border: "none",
                 color: "rgba(255,255,255,0.8)",
                 cursor: "pointer",
-                width: 28,
-                height: 28,
+                width: isMobile ? 32 : 28,
+                height: isMobile ? 32 : 28,
                 borderRadius: "50%",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                fontSize: 14,
+                fontSize: isMobile ? 16 : 14,
                 transition: "background 0.15s",
               }}
             >
@@ -300,33 +385,23 @@ export default function ChatWidget() {
           </div>
 
           {/* Messages */}
-          <div
-            style={{
-              height: 390,
-              overflowY: "auto",
-              padding: "14px 14px 8px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-              background: "#FAFAFA",
-            }}
-          >
-            {msgs.map((m, i) => (
+          <div className="carbis-messages" style={messagesStyle}>
+            {msgs.map((m, idx) => (
               <div
-                key={i}
+                key={idx}
                 style={{
                   display: "flex",
                   justifyContent: m.role === "user" ? "flex-end" : "flex-start",
                   alignItems: "flex-end",
-                  gap: 8,
+                  gap: isMobile ? 6 : 8,
                 }}
               >
                 {/* Avatar for assistant */}
                 {m.role === "assistant" && (
                   <div
                     style={{
-                      width: 28,
-                      height: 28,
+                      width: isMobile ? 24 : 28,
+                      height: isMobile ? 24 : 28,
                       borderRadius: "50%",
                       background: "linear-gradient(135deg, #CE191E, #a01217)",
                       display: "flex",
@@ -336,7 +411,7 @@ export default function ChatWidget() {
                       marginBottom: 2,
                     }}
                   >
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <svg width={isMobile ? 11 : 13} height={isMobile ? 11 : 13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                     </svg>
                   </div>
@@ -344,10 +419,10 @@ export default function ChatWidget() {
 
                 <div
                   style={{
-                    maxWidth: "80%",
+                    maxWidth: isMobile ? "85%" : "80%",
                     borderRadius: m.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
-                    padding: "10px 14px",
-                    fontSize: 13.5,
+                    padding: isMobile ? "10px 12px" : "10px 14px",
+                    fontSize: isMobile ? 13 : 13.5,
                     lineHeight: 1.55,
                     background: m.role === "user"
                       ? "linear-gradient(135deg, #CE191E, #a01217)"
@@ -357,6 +432,7 @@ export default function ChatWidget() {
                       ? "0 2px 12px rgba(206,25,30,0.3)"
                       : "0 1px 6px rgba(0,0,0,0.08)",
                     border: m.role === "assistant" ? "1px solid rgba(0,0,0,0.06)" : "none",
+                    wordBreak: "break-word",
                   }}
                 >
                   {m.role === "assistant" ? renderMarkdown(m.text) : m.text}
@@ -366,15 +442,20 @@ export default function ChatWidget() {
 
             {/* Typing indicator */}
             {loading && (
-              <div style={{ display: "flex", alignItems: "flex-end", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: isMobile ? 6 : 8 }}>
                 <div
                   style={{
-                    width: 28, height: 28, borderRadius: "50%",
+                    width: isMobile ? 24 : 28,
+                    height: isMobile ? 24 : 28,
+                    borderRadius: "50%",
                     background: "linear-gradient(135deg, #CE191E, #a01217)",
-                    display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
                   }}
                 >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width={isMobile ? 11 : 13} height={isMobile ? 11 : 13} viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   </svg>
                 </div>
@@ -412,12 +493,13 @@ export default function ChatWidget() {
           {showSuggestions && msgs.length <= 1 && (
             <div
               style={{
-                padding: "8px 14px",
+                padding: isMobile ? "8px 12px" : "8px 14px",
                 display: "flex",
                 flexWrap: "wrap",
                 gap: 6,
                 borderTop: "1px solid #f0f0f0",
                 background: "#FAFAFA",
+                flexShrink: 0,
               }}
             >
               {SUGGESTIONS.map((s) => (
@@ -426,8 +508,8 @@ export default function ChatWidget() {
                   className="carbis-suggestion"
                   onClick={() => send(s)}
                   style={{
-                    fontSize: 11.5,
-                    padding: "5px 11px",
+                    fontSize: isMobile ? 11 : 11.5,
+                    padding: isMobile ? "6px 12px" : "5px 11px",
                     borderRadius: 20,
                     border: "1px solid #e5e7eb",
                     background: "white",
@@ -446,12 +528,13 @@ export default function ChatWidget() {
           {/* Input area */}
           <div
             style={{
-              padding: "10px 12px",
+              padding: isMobile ? "10px 12px env(safe-area-inset-bottom, 10px)" : "10px 12px",
               borderTop: "1px solid #f0f0f0",
               display: "flex",
               gap: 8,
               alignItems: "center",
               background: "white",
+              flexShrink: 0,
             }}
           >
             <input
@@ -469,11 +552,12 @@ export default function ChatWidget() {
                 flex: 1,
                 borderRadius: 12,
                 border: "1.5px solid #e5e7eb",
-                padding: "9px 14px",
-                fontSize: 13.5,
+                padding: isMobile ? "10px 12px" : "9px 14px",
+                fontSize: isMobile ? 14 : 13.5,
                 color: "#111",
                 background: "#f9fafb",
                 transition: "border-color 0.2s, box-shadow 0.2s",
+                WebkitAppearance: "none",
               }}
             />
             <button
@@ -484,8 +568,8 @@ export default function ChatWidget() {
                 background: "linear-gradient(135deg, #CE191E, #a01217)",
                 border: "none",
                 borderRadius: 12,
-                width: 40,
-                height: 40,
+                width: isMobile ? 42 : 40,
+                height: isMobile ? 42 : 40,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
@@ -506,12 +590,13 @@ export default function ChatWidget() {
           {/* Footer */}
           <div
             style={{
-              padding: "6px 14px 10px",
+              padding: isMobile ? "6px 12px 8px" : "6px 14px 10px",
               textAlign: "center",
-              fontSize: 11,
+              fontSize: isMobile ? 10 : 11,
               color: "#9ca3af",
               background: "white",
               borderTop: "1px solid #f5f5f5",
+              flexShrink: 0,
             }}
           >
             Powered by Carbis AI · <a href="mailto:sales@carbissolutions.com" style={{ color: "#CE191E", textDecoration: "none" }}>sales@carbissolutions.com</a>

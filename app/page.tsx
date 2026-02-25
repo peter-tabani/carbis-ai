@@ -9,7 +9,7 @@ export default function Page() {
       <header
         style={{
           background: "linear-gradient(135deg, #080202 0%, #1a0404 50%, #0a0202 100%)",
-          padding: "56px 24px 48px",
+          padding: "clamp(32px, 6vw, 56px) clamp(16px, 4vw, 24px) clamp(28px, 5vw, 48px)",
           position: "relative",
           overflow: "hidden",
         }}
@@ -43,14 +43,14 @@ export default function Page() {
             }}
           >
             <div style={{ width: 6, height: 6, borderRadius: "50%", background: "#CE191E" }} />
-            <span style={{ color: "#CE191E", fontSize: 12, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+            <span style={{ color: "#CE191E", fontSize: "clamp(10px, 2.5vw, 12px)", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase" }}>
               AI-Powered Product Assistant · Demo
             </span>
           </div>
 
           <h1
             style={{
-              fontSize: "clamp(28px, 5vw, 44px)",
+              fontSize: "clamp(24px, 5vw, 44px)",
               fontWeight: 800,
               color: "#ffffff",
               lineHeight: 1.1,
@@ -62,42 +62,48 @@ export default function Page() {
             <span style={{ color: "#CE191E" }}>Carbis Solutions</span>
           </h1>
 
-          <p style={{ fontSize: 17, color: "rgba(255,255,255,0.65)", maxWidth: 640, lineHeight: 1.6, margin: "0 0 32px" }}>
+          <p style={{
+            fontSize: "clamp(14px, 3vw, 17px)",
+            color: "rgba(255,255,255,0.65)",
+            maxWidth: 640,
+            lineHeight: 1.6,
+            margin: "0 0 clamp(20px, 4vw, 32px)",
+          }}>
             Ask anything about our fall protection equipment, loading arms, marine access systems, or safety platforms — and get a clear, accurate answer instantly.
           </p>
 
-          {/* Contact bar */}
+          {/* Contact bar — stacks on mobile */}
           <div
             style={{
               display: "inline-flex",
               flexWrap: "wrap",
-              gap: 12,
+              gap: "clamp(8px, 2vw, 12px)",
               background: "rgba(255,255,255,0.06)",
               border: "1px solid rgba(255,255,255,0.1)",
               borderRadius: 14,
-              padding: "14px 20px",
+              padding: "clamp(10px, 2vw, 14px) clamp(14px, 3vw, 20px)",
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 16 }}>📧</span>
               <a
                 href="mailto:sales@carbissolutions.com"
-                style={{ color: "rgba(255,255,255,0.85)", fontSize: 13.5, textDecoration: "none", fontWeight: 500 }}
+                style={{ color: "rgba(255,255,255,0.85)", fontSize: "clamp(12px, 2.5vw, 13.5px)", textDecoration: "none", fontWeight: 500 }}
               >
                 sales@carbissolutions.com
               </a>
             </div>
-            <div style={{ width: 1, background: "rgba(255,255,255,0.15)", alignSelf: "stretch" }} />
+            <div style={{ width: 1, background: "rgba(255,255,255,0.15)", alignSelf: "stretch", display: "var(--contact-divider-display, block)" }} />
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 16 }}>📞</span>
-              <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 13.5, fontWeight: 500 }}>
+              <span style={{ color: "rgba(255,255,255,0.85)", fontSize: "clamp(12px, 2.5vw, 13.5px)", fontWeight: 500 }}>
                 US: 1-800-948-7750
               </span>
             </div>
-            <div style={{ width: 1, background: "rgba(255,255,255,0.15)", alignSelf: "stretch" }} />
+            <div style={{ width: 1, background: "rgba(255,255,255,0.15)", alignSelf: "stretch", display: "var(--contact-divider-display, block)" }} />
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 16 }}>🌍</span>
-              <span style={{ color: "rgba(255,255,255,0.85)", fontSize: 13.5, fontWeight: 500 }}>
+              <span style={{ color: "rgba(255,255,255,0.85)", fontSize: "clamp(12px, 2.5vw, 13.5px)", fontWeight: 500 }}>
                 Global: +1-843-669-6668
               </span>
             </div>
@@ -106,9 +112,9 @@ export default function Page() {
       </header>
 
       {/* Product category cards */}
-      <section style={{ padding: "40px 24px", background: "#f9fafb" }}>
+      <section style={{ padding: "clamp(24px, 5vw, 40px) clamp(16px, 4vw, 24px)", background: "#f9fafb" }}>
         <div style={{ maxWidth: 900, margin: "0 auto" }}>
-          <p style={{ fontSize: 13, fontWeight: 700, color: "#9ca3af", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 16 }}>
+          <p style={{ fontSize: "clamp(11px, 2.5vw, 13px)", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 16 }}>
             Topics the AI can help with
           </p>
           <ProductCards />
@@ -116,8 +122,15 @@ export default function Page() {
       </section>
 
       {/* About strip */}
-      <section style={{ padding: "32px 24px", borderTop: "1px solid #e5e7eb" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto", display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+      <section style={{ padding: "clamp(20px, 4vw, 32px) clamp(16px, 4vw, 24px)", borderTop: "1px solid #e5e7eb" }}>
+        <div style={{
+          maxWidth: 900,
+          margin: "0 auto",
+          display: "flex",
+          alignItems: "center",
+          gap: "clamp(10px, 2vw, 16px)",
+          flexWrap: "wrap",
+        }}>
           <div
             style={{
               background: "#CE191E",
@@ -131,7 +144,7 @@ export default function Page() {
           >
             Since 1930
           </div>
-          <p style={{ color: "#374151", fontSize: 14, lineHeight: 1.6, margin: 0 }}>
+          <p style={{ color: "#374151", fontSize: "clamp(12.5px, 2.5vw, 14px)", lineHeight: 1.6, margin: 0 }}>
             <strong>Carbis Solutions Group</strong> is the world leader in fall protection at loading racks, offering complete safety solutions — from engineering and equipment to installation and service.
           </p>
         </div>
