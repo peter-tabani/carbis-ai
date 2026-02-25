@@ -2,13 +2,18 @@ import OpenAI from "openai";
 import chunks from "@/data/carbis_embeddings.json";
 import { keywordSearch } from "@/lib/search";
 
-// ─── OpenAI client ─────────────────────────────────────────────────────────────
+// ─── OpenAI client (lazy-initialized) ──────────────────────────────────────────
 // Uses OPENAI_API_KEY env var. OPENAI_BASE_URL can override the endpoint.
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  baseURL:
-    process.env.OPENAI_BASE_URL ?? "https://api.manus.im/api/llm-proxy/v1/",
-});
+function getOpenAI(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing OPENAI_API_KEY environment variable. Add it to .env.local");
+  }
+  return new OpenAI({
+    apiKey,
+    baseURL: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
+  });
+}
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type Chunk = {
@@ -293,7 +298,7 @@ export async function POST(req: Request) {
     const maxTokens =
       intent === "detailed" ? 700 : intent === "simple" ? 350 : 200;
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAI().chat.completions.create({
       model: "gpt-4.1-mini",
       messages: [
         { role: "system", content: systemPrompt },
