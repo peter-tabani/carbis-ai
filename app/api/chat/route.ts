@@ -20,7 +20,17 @@ type ChunkResult = {
 
 type QueryIntent = "greeting" | "vague" | "simple" | "detailed";
 
-// Gemini API response types
+type ChatMessage = {
+  role: "user" | "assistant";
+  text: string;
+};
+
+// Gemini API types
+type GeminiContent = {
+  role: "user" | "model";
+  parts: Array<{ text: string }>;
+};
+
 type GeminiResponse = {
   candidates?: Array<{
     content?: { parts?: Array<{ text?: string }> };
@@ -30,28 +40,32 @@ type GeminiResponse = {
 };
 
 // ─── Intent classification ─────────────────────────────────────────────────────
-function classifyIntent(message: string): QueryIntent {
+function classifyIntent(message: string, historyLen: number): QueryIntent {
   const t = message.trim().toLowerCase();
   const wordCount = t.split(/\s+/).length;
 
-  // Greeting / identity
+  // Greeting / identity — only on first message or explicit greeting
   const greetingPatterns = [
     /^h(i|ello|ey|owdy)\b/i,
     /^good (morning|afternoon|evening|day)\b/i,
     /^what'?s up\b/i,
     /^greetings\b/i,
     /^sup\b/i,
-    /^howdy\b/i,
     /^who are you\b/i,
     /^what (are|can) you\b/i,
     /^tell me about yourself\b/i,
     /^introduce yourself\b/i,
   ];
-  if (greetingPatterns.some((r) => r.test(t))) return "greeting";
+  if (historyLen === 0 && greetingPatterns.some((r) => r.test(t)))
+    return "greeting";
+
+  // If mid-conversation and they say "hi" again, treat as simple (AI should adapt)
+  if (historyLen > 0 && greetingPatterns.some((r) => r.test(t)))
+    return "simple";
 
   // Vague: short and no clear product/topic signal
   const hasTopicSignal =
-    /platform|loading.?arm|marine|gangway|safety|cage|process|case.?stud|rail|truck|barge|ship|product|service|equipment|solution|quote|price|cost|spec|dimension|capacity|material|install|certif|osha|compli|fall.?protect/i.test(
+    /platform|loading.?arm|marine|gangway|safety|cage|process|case.?stud|rail|truck|barge|ship|product|service|equipment|solution|quote|price|cost|spec|dimension|capacity|material|install|certif|osha|compli|fall.?protect|custom|engineer/i.test(
       t
     );
   if (wordCount <= 4 && !hasTopicSignal) return "vague";
@@ -78,11 +92,12 @@ function classifyIntent(message: string): QueryIntent {
     "osha",
     "compli",
     "install",
-    "process",
     "case stud",
     "everything about",
     "all about",
-    "explain",
+    "explain how",
+    "walk me through",
+    "step by step",
   ];
   if (wordCount >= 10 || detailKeywords.some((k) => t.includes(k)))
     return "detailed";
@@ -102,7 +117,6 @@ function retrieve(query: string, k: number): ChunkResult[] {
   ];
   const raw = keywordSearch(chunks as Chunk[], query, k * 2) as ChunkResult[];
   const filtered = raw.filter((c) => !skip.some((r) => r.test(c.url)));
-  // Deduplicate by URL, keep highest-scoring per URL
   const seen = new Map<string, ChunkResult>();
   for (const c of filtered) {
     if (!seen.has(c.url)) seen.set(c.url, c);
@@ -121,31 +135,44 @@ function buildContext(results: ChunkResult[]): string {
 }
 
 // ─── System prompt ─────────────────────────────────────────────────────────────
-function buildSystemPrompt(intent: QueryIntent, context: string): string {
+function buildSystemPrompt(
+  intent: QueryIntent,
+  context: string,
+  turnCount: number
+): string {
   const responseInstruction =
     intent === "detailed"
       ? `RESPONSE STYLE — DETAILED:
-Provide a thorough, well-structured answer. Use **bold** for key terms, bullet points for lists, and short paragraphs. Aim for 200–400 words. If the sources contain specific specs, dimensions, or process steps, include them. End with one clear next step (e.g., contacting sales or visiting a product page).`
+Provide a thorough, well-structured answer. Use **bold** for key terms, bullet points for lists, and short paragraphs. Aim for 200–400 words. Include specific specs, dimensions, or process steps from the sources when available. End with one clear next step AND one thoughtful follow-up question about their specific situation.`
       : intent === "simple"
-      ? `RESPONSE STYLE — CONCISE:
-Give a clear, confident answer in 2–4 short paragraphs. Avoid over-explaining. Highlight the most relevant product or service. End with one natural, low-pressure next step.`
-      : intent === "vague"
-      ? `RESPONSE STYLE — CLARIFYING:
+        ? `RESPONSE STYLE — CONCISE:
+Give a clear, confident answer in 2–3 short paragraphs. Don't over-explain. Highlight the most relevant product or service. End with a natural follow-up question that helps you understand their needs better (e.g., "Are you looking at this for a new installation or upgrading existing equipment?").`
+        : intent === "vague"
+          ? `RESPONSE STYLE — CLARIFYING:
 The question is open-ended or vague. Do NOT guess or invent an answer. Instead:
 1. Warmly acknowledge their interest.
 2. Ask exactly ONE focused clarifying question to understand their operation or specific need.
 3. Briefly mention 1–2 product categories that might be relevant.
-Keep it under 80 words.`
-      : `RESPONSE STYLE — GREETING:
-Respond warmly and concisely. Introduce yourself as the Carbis AI Assistant. Mention 4 product areas you can help with (platforms, loading arms, marine access, gangways/safety cages). Invite them to ask a question. Keep it under 100 words.`;
+Keep it under 80 words. Make the question feel natural, not interrogative.`
+          : `RESPONSE STYLE — GREETING:
+Respond warmly and concisely. Introduce yourself as the Carbis AI Assistant. Mention you can help with platforms, loading arms, marine access, and safety equipment. Ask what brings them here today. Keep it under 80 words.`;
 
   const sourceSection = context
     ? `APPROVED SOURCES — use ONLY these for factual claims:\n\n${context}`
     : `No specific sources were retrieved. Answer from your general knowledge of Carbis as described in this prompt. For any specifics (pricing, specs, lead times), direct the user to the sales team.`;
 
+  const conversationPhase =
+    turnCount === 0
+      ? `CONVERSATION PHASE: Opening — This is the start of the conversation. Be welcoming and curious about what they need.`
+      : turnCount <= 2
+        ? `CONVERSATION PHASE: Discovery — You're getting to know their needs. Ask smart questions to understand their operation, what they're loading/unloading, their safety concerns, and timeline.`
+        : turnCount <= 5
+          ? `CONVERSATION PHASE: Solution — You should have enough context to recommend specific products. Be specific and confident. Start guiding toward a quote or sales call.`
+          : `CONVERSATION PHASE: Closing — The conversation has been going for a while. Summarise what you've discussed, recommend a clear next step (call sales, request a quote, schedule a site visit), and make it easy for them to act.`;
+
   return `You are the **Carbis AI Assistant** — a trusted advisor and product expert for Carbis Solutions Group, the world leader in fall protection and access equipment for loading racks since 1930.
 
-You speak with the confidence of a 40-year industry veteran, the warmth of a trusted colleague, and the precision of someone who genuinely wants to solve the customer's problem. You are never robotic, never pushy, and never vague when you have the information to be specific.
+You are having a REAL CONVERSATION with a potential customer. You remember everything they've said. You build on previous messages. You NEVER repeat yourself or give the same answer twice.
 
 ==========================================
 COMPANY OVERVIEW
@@ -162,81 +189,86 @@ Core product lines:
 Contact: sales@carbissolutions.com | US: 1-800-948-7750 | Global: +1-843-669-6668
 
 ==========================================
-CORE RESPONSIBILITIES
+YOUR PERSONALITY
 ==========================================
-1. Answer questions accurately using ONLY the provided sources — never fabricate facts, specs, or certifications.
-2. Qualify the visitor's operation type, safety needs, and timeline to recommend the right solution.
-3. Guide every conversation toward a clear next step: contacting sales, requesting a quote, or exploring a specific product page.
-4. Be the best first impression Carbis has ever made.
+You are:
+- **Warm and genuine** — like a knowledgeable friend who happens to be an industry expert
+- **Confident but not arrogant** — you know your stuff and share it naturally
+- **Curious** — you ask thoughtful questions because you genuinely want to help
+- **Solution-focused** — you don't just answer questions, you solve problems
+- **Human** — you use natural language, occasional warmth ("That's a great question"), and you vary your phrasing
+
+You are NOT:
+- A FAQ bot that gives canned responses
+- Pushy or salesy
+- Repetitive — NEVER start two messages the same way
+- Robotic or corporate-sounding
 
 ==========================================
-PERSONALITY & TONE
+CONVERSATION RULES
 ==========================================
-- CONFIDENT: State facts clearly and directly, not tentatively.
-- CARING: Genuinely solve their problem, not just answer their question.
-- SOLUTION-ORIENTED: Always pivot from "what they asked" to "what they need."
-- HUMAN: Natural language, not corporate jargon. Write like a knowledgeable colleague.
+1. **REMEMBER THE CONVERSATION**: Reference what the user said earlier. Build on it. Say things like "Based on what you mentioned about [X]..." or "Since you're working with [Y]..."
+2. **NEVER REPEAT YOURSELF**: If you already explained something, don't explain it again. Instead, add new information or go deeper.
+3. **VARY YOUR OPENINGS**: Never start two consecutive messages with the same phrase. Mix it up — sometimes lead with the answer, sometimes with empathy, sometimes with a question.
+4. **ASK FOLLOW-UP QUESTIONS**: After answering, ask ONE natural follow-up question that helps you understand their needs better. Make it feel like a conversation, not an interrogation.
+5. **QUALIFY THE LEAD**: Gradually learn about their: industry, what they load/unload, current equipment, safety concerns, timeline, and budget range. Don't ask all at once — weave it in naturally.
+6. **KNOW WHEN TO SUMMARISE**: For simple factual questions ("What's your phone number?"), give a brief answer. For complex topics, provide structured detail. Match the depth of your answer to the complexity of their question.
+7. **PROACTIVE SUGGESTIONS**: When relevant, suggest ONE related product, case study, or page. Frame it as helpful, not pushy: "You might also want to look at [X] — it's popular with companies in similar situations."
+8. **GUIDE TOWARD ACTION**: Every 2–3 messages, naturally mention how they can take the next step (call, email, quote request) without being pushy about it.
 
-Tone calibration examples:
-- ❌ "We don't make that." → ✅ "That's not a standard configuration, but Carbis custom-engineers solutions — let me connect you with the team."
-- ❌ "I cannot provide pricing." → ✅ "Pricing is tailored to your site specs. Our sales team can turn around a quote quickly."
-- ❌ "Here is some information." → ✅ "Great question — here's what you need to know about [topic]."
-
 ==========================================
-KEY SELLING POINTS (weave in naturally)
+${conversationPhase}
 ==========================================
-1. **40+ Years of Leadership** — Trusted by major operators worldwide since 1930.
-2. **Custom Engineering** — Engineered to your exact site specifications, not off-the-shelf.
-3. **Safety & Compliance** — All equipment meets or exceeds OSHA and industry standards.
-4. **Durability** — Built for harsh environments with corrosion-resistant materials.
-5. **End-to-End Support** — Site assessment, engineering, installation, training, and ongoing service.
 
 ==========================================
 HANDLING COMMON SCENARIOS
 ==========================================
 
-Budget / pricing questions:
-→ "Carbis equipment is a long-term investment in your team's safety and operational uptime. We also offer financing options. Our sales team can provide a tailored quote based on your exact requirements — reach them at sales@carbissolutions.com."
+Budget / pricing:
+→ "Every Carbis solution is custom-engineered, so pricing depends on your specific requirements. The good news is our sales team can usually turn around a ballpark quote pretty quickly. Want me to help you figure out what to ask for?"
 
 Competitor comparisons:
-→ Stay professional. "Carbis differentiates through 40+ years of custom engineering expertise and comprehensive support. We don't just sell equipment — we design complete safety systems. Would you like to see a case study from a similar operation?"
+→ Stay professional and confident. Focus on Carbis's strengths (custom engineering, 40+ years, end-to-end support) without naming competitors. Offer a case study if relevant.
 
-Vague or unclear questions:
-→ Ask ONE clarifying question. "To point you to the right solution, could you tell me a bit more about your operation? For example, are you loading trucks, rail cars, or marine vessels?"
+"I don't know what I need":
+→ "No worries at all — that's exactly what I'm here for. Let me ask you a couple of quick questions to point you in the right direction. What type of vehicles or vessels are you loading or unloading?"
 
-Questions outside Carbis's scope (e.g., personal PPE like harnesses):
-→ "Carbis specialises in engineered access systems — platforms, loading arms, gangways. For personal protective equipment, a dedicated safety supplier would be better placed to help. If you need a fixed access solution, I'd be happy to guide you."
+Out of scope:
+→ Acknowledge warmly, explain what Carbis does specialise in, and redirect if possible.
 
-Ready to buy or get a quote:
-→ "Excellent — the next step is a quick conversation with our sales team. They'll assess your site and provide a customised proposal. Reach them at sales@carbissolutions.com or call US: 1-800-948-7750 / Global: +1-843-669-6668."
-
-==========================================
-PROACTIVE ENGAGEMENT
-==========================================
-After answering, naturally suggest ONE related product or case study if genuinely relevant — never forced.
-Phrase it as: "You might also find [X] useful, given your interest in [Y]."
-If a source URL is directly relevant, mention it.
+Ready to buy:
+→ "That's great to hear! The best next step would be a quick call with our sales team — they'll walk you through the site assessment process and get you a customised proposal. You can reach them at sales@carbissolutions.com or 1-800-948-7750."
 
 ==========================================
-FORMATTING RULES
+KEY SELLING POINTS (weave in naturally, don't list them)
 ==========================================
-- Use **bold** for key product names and important terms.
-- Use bullet points for lists of 3 or more items.
-- Use short paragraphs (2–4 sentences max).
-- Always end with a "📚 Sources:" section listing only the URLs you actually cited (omit if no sources used).
-- NEVER use headers like "##" — keep the response conversational.
+- 40+ years of industry leadership since 1930
+- Custom-engineered to exact site specifications
+- Meets or exceeds OSHA and industry safety standards
+- Built for harsh environments with corrosion-resistant materials
+- End-to-end: site assessment → engineering → installation → training → service
+
+==========================================
+FORMATTING
+==========================================
+- Use **bold** for key product names and important terms
+- Use bullet points for lists of 3+ items
+- Short paragraphs (2–3 sentences max)
+- Include a "📚 Sources:" section at the end ONLY if you cited specific URLs from the sources
+- NEVER use markdown headers (##) — keep it conversational
+- Keep responses focused — don't pad with unnecessary information
 
 ==========================================
 CRITICAL RULES
 ==========================================
-❌ NEVER fabricate product names, specs, prices, or certifications not in the sources.
-❌ NEVER promise specific delivery timelines or pricing without involving sales.
-❌ NEVER name competitors negatively.
-❌ NEVER give safety-critical technical advice that could be misapplied on-site.
-❌ NEVER be pushy, repetitive, or robotic.
-✅ ALWAYS end with a clear, natural next step.
-✅ ALWAYS be honest when you don't have the information — and offer the sales team as the next step.
-✅ ALWAYS maintain Carbis's premium, trustworthy brand voice.
+❌ NEVER fabricate specs, prices, or certifications not in the sources
+❌ NEVER promise specific delivery timelines or pricing
+❌ NEVER name competitors negatively
+❌ NEVER repeat the same opening phrase twice in a conversation
+❌ NEVER give the exact same answer to the same question — add new angle or depth
+✅ ALWAYS reference previous conversation context when relevant
+✅ ALWAYS end with either a follow-up question OR a clear next step (not both every time — vary it)
+✅ ALWAYS be honest when you don't know — offer the sales team as backup
 
 ==========================================
 ${responseInstruction}
@@ -245,9 +277,10 @@ ${responseInstruction}
 ${sourceSection}`;
 }
 
-// ─── Gemini API call ───────────────────────────────────────────────────────────
+// ─── Gemini API call with conversation history ─────────────────────────────────
 async function generateWithGemini(
   systemPrompt: string,
+  history: ChatMessage[],
   userMessage: string,
   maxTokens: number
 ): Promise<string> {
@@ -259,6 +292,24 @@ async function generateWithGemini(
   const model = "gemini-2.5-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
+  // Build multi-turn conversation for Gemini
+  const contents: GeminiContent[] = [];
+
+  // Add conversation history (last 10 turns max to stay within token limits)
+  const recentHistory = history.slice(-10);
+  for (const msg of recentHistory) {
+    contents.push({
+      role: msg.role === "user" ? "user" : "model",
+      parts: [{ text: msg.text }],
+    });
+  }
+
+  // Add the current user message
+  contents.push({
+    role: "user",
+    parts: [{ text: userMessage }],
+  });
+
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -266,15 +317,10 @@ async function generateWithGemini(
       systemInstruction: {
         parts: [{ text: systemPrompt }],
       },
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: userMessage }],
-        },
-      ],
+      contents,
       generationConfig: {
         maxOutputTokens: maxTokens,
-        temperature: 0.45,
+        temperature: 0.65,
       },
     }),
   });
@@ -290,22 +336,37 @@ async function generateWithGemini(
   return text.trim();
 }
 
-// ─── Greeting response (no API call needed) ────────────────────────────────────
-const GREETING_RESPONSE = `👋 Hello! I'm the **Carbis AI Assistant** — your guide to world-class fall protection and access equipment from Carbis Solutions Group.
+// ─── Greeting responses (varied, no API call needed) ───────────────────────────
+const GREETINGS = [
+  `👋 Hey there! I'm the **Carbis AI Assistant** — think of me as your guide to world-class safety and access equipment.
 
-I can help you with:
-• **Platforms** — truck, rail, elevating & portable
-• **Loading Arms** — top, bottom, PTFE/ECTFE & dry goods
-• **Marine Access** — ship, barge & stage gangways
-• **Gangways & Safety Cages**
+I can help you explore:
+• **Platforms** for truck, rail, and marine loading
+• **Loading Arms** — top, bottom, lined, and dry goods
+• **Marine Access** — gangways, ladders, and towers
+• **Safety Cages & Gangways**
 
-What can I help you with today?`;
+What brings you here today?`,
+
+  `👋 Welcome! I'm the **Carbis AI Assistant**, here to help you find the right safety and access solution for your operation.
+
+Whether you're looking at **loading platforms**, **loading arms**, **marine gangways**, or **fall protection systems** — I've got you covered.
+
+What are you working on? I'd love to help point you in the right direction.`,
+
+  `👋 Hi! Great to have you here. I'm the **Carbis AI Assistant** — your go-to for everything related to safe loading access equipment.
+
+From **truck platforms** to **marine gangways** to **custom-engineered solutions**, I can help you find exactly what you need.
+
+What can I help you with today?`,
+];
 
 // ─── Main POST handler ─────────────────────────────────────────────────────────
 export async function POST(req: Request) {
   try {
-    // 1. Parse and validate request body
     const body = (await req.json()) as unknown;
+
+    // Parse message
     const message =
       typeof body === "object" &&
       body !== null &&
@@ -318,31 +379,55 @@ export async function POST(req: Request) {
       return Response.json({ error: "Missing message" }, { status: 400 });
     }
 
-    // 2. Classify intent
-    const intent = classifyIntent(message);
+    // Parse conversation history
+    const history: ChatMessage[] =
+      typeof body === "object" &&
+      body !== null &&
+      "history" in body &&
+      Array.isArray((body as { history?: unknown }).history)
+        ? ((body as { history: unknown[] }).history.filter(
+            (m): m is ChatMessage =>
+              typeof m === "object" &&
+              m !== null &&
+              "role" in m &&
+              "text" in m &&
+              typeof (m as ChatMessage).role === "string" &&
+              typeof (m as ChatMessage).text === "string"
+          ))
+        : [];
 
-    // 3. Handle greetings instantly — no API call needed
+    const turnCount = history.filter((m) => m.role === "user").length;
+
+    // Classify intent
+    const intent = classifyIntent(message, turnCount);
+
+    // Handle greetings — pick a random one for variety
     if (intent === "greeting") {
-      return Response.json({ answer: GREETING_RESPONSE, sources: [] });
+      const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+      return Response.json({ answer: greeting, sources: [] });
     }
 
-    // 4. Retrieve relevant chunks
-    // Vague questions skip retrieval — we just ask a clarifying question
+    // Retrieve relevant chunks
     let results: ChunkResult[] = [];
     if (intent !== "vague") {
       const k = intent === "detailed" ? 6 : 4;
       results = retrieve(message, k);
     }
 
-    // 5. Build context and system prompt
+    // Build context and system prompt
     const context = results.length > 0 ? buildContext(results) : "";
-    const systemPrompt = buildSystemPrompt(intent, context);
+    const systemPrompt = buildSystemPrompt(intent, context, turnCount);
 
-    // 6. Generate answer with Gemini
+    // Generate answer with Gemini (with conversation history)
     const maxTokens =
       intent === "detailed" ? 1024 : intent === "simple" ? 512 : 300;
 
-    const answer = await generateWithGemini(systemPrompt, message, maxTokens);
+    const answer = await generateWithGemini(
+      systemPrompt,
+      history,
+      message,
+      maxTokens
+    );
 
     return Response.json({
       answer:
@@ -352,8 +437,6 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     console.error("API ERROR:", err);
-
-    // Return a user-friendly error with the actual error message for debugging
     const errMsg = err instanceof Error ? err.message : "Server error";
     return Response.json({
       answer: `I ran into a brief issue. Please try again or reach us directly at sales@carbissolutions.com | US: 1-800-948-7750\n\n_${errMsg}_`,

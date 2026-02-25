@@ -16,38 +16,49 @@ function renderMarkdown(text: string): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
 
   lines.forEach((line, lineIdx) => {
-    // Blank line → spacer
     if (line.trim() === "") {
       nodes.push(<div key={`sp-${lineIdx}`} style={{ height: 6 }} />);
       return;
     }
 
-    // Bullet point
-    const isBullet = /^[•\-\*]\s/.test(line.trim());
-    const cleanLine = isBullet ? line.trim().replace(/^[•\-\*]\s/, "") : line;
+    const isBullet = /^[•\-*]\s/.test(line.trim());
+    const cleanLine = isBullet ? line.trim().replace(/^[•\-*]\s/, "") : line;
 
-    // Parse inline **bold** and 🔗 URLs
     const inlineNodes: React.ReactNode[] = [];
-    const parts = cleanLine.split(/(\*\*[^*]+\*\*|https?:\/\/[^\s]+)/g);
-    parts.forEach((part, pi) => {
+    const parts = cleanLine.split(/(\*\*[^*]+\*\*|\[([^\]]+)\]\((https?:\/\/[^)]+)\)|https?:\/\/[^\s]+)/g);
+
+    let i = 0;
+    while (i < parts.length) {
+      const part = parts[i];
+      if (!part) { i++; continue; }
+
       if (/^\*\*[^*]+\*\*$/.test(part)) {
-        inlineNodes.push(<strong key={pi}>{part.slice(2, -2)}</strong>);
+        inlineNodes.push(<strong key={i}>{part.slice(2, -2)}</strong>);
+        i++;
+      } else if (/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/.test(part)) {
+        const linkMatch = part.match(/^\[([^\]]+)\]\((https?:\/\/[^)]+)\)$/);
+        if (linkMatch) {
+          inlineNodes.push(
+            <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer"
+              style={{ color: "#CE191E", textDecoration: "underline", wordBreak: "break-all" }}>
+              {linkMatch[1]}
+            </a>
+          );
+        }
+        i += 3; // skip the captured groups
       } else if (/^https?:\/\//.test(part)) {
         inlineNodes.push(
-          <a
-            key={pi}
-            href={part}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "#CE191E", textDecoration: "underline", wordBreak: "break-all" }}
-          >
+          <a key={i} href={part} target="_blank" rel="noopener noreferrer"
+            style={{ color: "#CE191E", textDecoration: "underline", wordBreak: "break-all" }}>
             {part}
           </a>
         );
+        i++;
       } else {
-        inlineNodes.push(<span key={pi}>{part}</span>);
+        inlineNodes.push(<span key={i}>{part}</span>);
+        i++;
       }
-    });
+    }
 
     if (isBullet) {
       nodes.push(
@@ -99,6 +110,13 @@ export default function ChatWidget() {
 
     setInput("");
     setShowSuggestions(false);
+
+    // Build history from existing messages (excluding the initial greeting)
+    const history = msgs.slice(1).map((m) => ({
+      role: m.role,
+      text: m.text,
+    }));
+
     setMsgs((m) => [...m, { role: "user", text }]);
     setLoading(true);
 
@@ -106,7 +124,7 @@ export default function ChatWidget() {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, history }),
       });
 
       const json: unknown = await res.json();
