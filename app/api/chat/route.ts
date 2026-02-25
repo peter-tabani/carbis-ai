@@ -150,7 +150,7 @@ export async function POST(req: Request) {
     }
 
     // 2. Classify query and retrieve relevant chunks
-    const queryType = classifyQuery(message);
+    classifyQuery(message);
     const qVec = await embedQuery(message, apiKey);
     const results = semanticTopK(embedded as EmbeddedChunk[], qVec, 6);
     const filteredResults = filterIrrelevantChunks(results);
@@ -309,7 +309,7 @@ ${context}
       }, [] as EmbeddedChunk[]);
       
       const sourcesList = uniqueResults
-        .map((r, i) => `• [${r.title}](${r.url})`)
+        .map((r) => `• [${r.title}](${r.url})`)
         .join("\n");
         
       const fallback =
