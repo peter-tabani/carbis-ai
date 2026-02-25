@@ -1,19 +1,5 @@
-import OpenAI from "openai";
 import chunks from "@/data/carbis_embeddings.json";
 import { keywordSearch } from "@/lib/search";
-
-// ─── OpenAI client (lazy-initialized) ──────────────────────────────────────────
-// Uses OPENAI_API_KEY env var. OPENAI_BASE_URL can override the endpoint.
-function getOpenAI(): OpenAI {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    throw new Error("Missing OPENAI_API_KEY environment variable. Add it to .env.local");
-  }
-  return new OpenAI({
-    apiKey,
-    baseURL: process.env.OPENAI_BASE_URL ?? "https://api.openai.com/v1",
-  });
-}
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 type Chunk = {
@@ -24,7 +10,24 @@ type Chunk = {
   embedding: number[];
 };
 
+type ChunkResult = {
+  id: string;
+  url: string;
+  title: string;
+  chunk: string;
+  score: number;
+};
+
 type QueryIntent = "greeting" | "vague" | "simple" | "detailed";
+
+// Gemini API response types
+type GeminiResponse = {
+  candidates?: Array<{
+    content?: { parts?: Array<{ text?: string }> };
+    finishReason?: string;
+  }>;
+  error?: { code: number; message: string };
+};
 
 // ─── Intent classification ─────────────────────────────────────────────────────
 function classifyIntent(message: string): QueryIntent {
@@ -88,8 +91,6 @@ function classifyIntent(message: string): QueryIntent {
 }
 
 // ─── Retrieval ─────────────────────────────────────────────────────────────────
-type ChunkResult = { id: string; url: string; title: string; chunk: string; score: number };
-
 function retrieve(query: string, k: number): ChunkResult[] {
   const skip = [
     /privacy/i,
@@ -100,9 +101,7 @@ function retrieve(query: string, k: number): ChunkResult[] {
     /returns?/i,
   ];
   const raw = keywordSearch(chunks as Chunk[], query, k * 2) as ChunkResult[];
-  const filtered = raw.filter(
-    (c) => !skip.some((r) => r.test(c.url))
-  );
+  const filtered = raw.filter((c) => !skip.some((r) => r.test(c.url)));
   // Deduplicate by URL, keep highest-scoring per URL
   const seen = new Map<string, ChunkResult>();
   for (const c of filtered) {
@@ -246,6 +245,51 @@ ${responseInstruction}
 ${sourceSection}`;
 }
 
+// ─── Gemini API call ───────────────────────────────────────────────────────────
+async function generateWithGemini(
+  systemPrompt: string,
+  userMessage: string,
+  maxTokens: number
+): Promise<string> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error("Missing GEMINI_API_KEY environment variable");
+  }
+
+  const model = "gemini-2.5-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: {
+        parts: [{ text: systemPrompt }],
+      },
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: userMessage }],
+        },
+      ],
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        temperature: 0.45,
+      },
+    }),
+  });
+
+  const json = (await res.json()) as GeminiResponse;
+
+  if (!res.ok || json.error) {
+    const errMsg = json.error?.message ?? `HTTP ${res.status}`;
+    throw new Error(`Gemini API error: ${errMsg}`);
+  }
+
+  const text = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+  return text.trim();
+}
+
 // ─── Greeting response (no API call needed) ────────────────────────────────────
 const GREETING_RESPONSE = `👋 Hello! I'm the **Carbis AI Assistant** — your guide to world-class fall protection and access equipment from Carbis Solutions Group.
 
@@ -277,7 +321,7 @@ export async function POST(req: Request) {
     // 2. Classify intent
     const intent = classifyIntent(message);
 
-    // 3. Handle greetings instantly — no LLM call needed
+    // 3. Handle greetings instantly — no API call needed
     if (intent === "greeting") {
       return Response.json({ answer: GREETING_RESPONSE, sources: [] });
     }
@@ -294,21 +338,11 @@ export async function POST(req: Request) {
     const context = results.length > 0 ? buildContext(results) : "";
     const systemPrompt = buildSystemPrompt(intent, context);
 
-    // 6. Generate answer with OpenAI
+    // 6. Generate answer with Gemini
     const maxTokens =
-      intent === "detailed" ? 700 : intent === "simple" ? 350 : 200;
+      intent === "detailed" ? 1024 : intent === "simple" ? 512 : 300;
 
-    const completion = await getOpenAI().chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: message },
-      ],
-      temperature: 0.45,
-      max_tokens: maxTokens,
-    });
-
-    const answer = completion.choices[0]?.message?.content?.trim() ?? "";
+    const answer = await generateWithGemini(systemPrompt, message, maxTokens);
 
     return Response.json({
       answer:
@@ -318,9 +352,12 @@ export async function POST(req: Request) {
     });
   } catch (err) {
     console.error("API ERROR:", err);
-    return Response.json(
-      { error: err instanceof Error ? err.message : "Server error" },
-      { status: 500 }
-    );
+
+    // Return a user-friendly error with the actual error message for debugging
+    const errMsg = err instanceof Error ? err.message : "Server error";
+    return Response.json({
+      answer: `I ran into a brief issue. Please try again or reach us directly at sales@carbissolutions.com | US: 1-800-948-7750\n\n_${errMsg}_`,
+      sources: [],
+    });
   }
 }
